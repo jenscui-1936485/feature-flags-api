@@ -8,15 +8,14 @@ services:
       deploy_on_push: true
     dockerfile_path: Dockerfile
     http_port: 8080
-    # Request-based autoscaling works on shared CPU plans (basic-*).
-    # Do not set instance_count when autoscaling is enabled.
-    instance_size_slug: basic-xs
+    # CPU autoscaling requires a dedicated CPU plan (apps-d-*).
+    instance_size_slug: apps-d-1vcpu-0.5gb
     autoscaling:
       min_instance_count: 2
       max_instance_count: 5
       metrics:
-        requests_per_second:
-          per_instance: 50
+        cpu:
+          percent: 70
     health_check:
       http_path: /ready
     envs:
@@ -30,7 +29,6 @@ services:
         value: INFO
       - key: RUN_MIGRATIONS_ON_STARTUP
         value: "true"
-      # Bind to attached managed DB components (trusted sources wired by App Platform).
       - key: DATABASE_URL
         scope: RUN_TIME
         value: ${flags-db.DATABASE_URL}
@@ -42,7 +40,6 @@ services:
         type: SECRET
         value: REPLACE_ME_AT_DEPLOY
 databases:
-  # Use the already-provisioned clusters (flags-pg / flags-redis Valkey).
   - name: flags-db
     engine: PG
     version: "16"

@@ -93,7 +93,7 @@ flowchart LR
 1. Provision managed Postgres + managed Redis/Valkey (or reuse clusters named in `.do/app.yaml`).
 2. Set secret `API_KEY` (long random). `DATABASE_URL` / `REDIS_URL` bind from attached DB components.
 3. Deploy via `.do/app.yaml` or App Platform UI; health path `/ready`.
-4. Autoscaling: 2–5 instances by requests/sec (`basic-xs` shared CPU). Switch to a dedicated CPU size if you want CPU-based autoscaling instead.
+4. Autoscaling: 2–5 dedicated instances (`apps-d-1vcpu-0.5gb`) targeting ~70% CPU.
 
 ```bash
 doctl apps create --spec .do/app.yaml
