@@ -7,7 +7,7 @@
 - Create and persist feature flags (`key`, `description`, `enabled` default).
 - Enable/disable a flag globally.
 - Enable/disable a flag for a specific user (override).
-- Evaluate whether a flag is enabled for a user (override → else global default).
+- Evaluate whether a flag is enabled for a user (override → kill switch → percentage rollout).
 - Cache evaluations/flag data; invalidate on writes.
 - Sensible HTTP status codes (`200`, `201`, `204`, `400`, `404`, `409`, `422`, `500`, `503`).
 
@@ -112,7 +112,9 @@ Python 3.12 · FastAPI · Pydantic · SQLAlchemy · Alembic · Postgres (prod) /
 | DB | Postgres in prod, SQLite in dev | Concurrent writes + HA |
 | Shape | Modular monolith | Enough until async side effects appear |
 | Auth | API key when configured | Simple shared-secret for service-to-service |
+| Rollout | Stable SHA-256 bucket per `flag_key:user_id` | Deterministic gradual release without allowlists |
 | Migrations | Alembic | Repeatable schema changes |
+| Scale | App Platform CPU autoscaling 2–5 | Handles load without manual replica edits |
 
 ## Known limitations
 
@@ -120,7 +122,8 @@ Python 3.12 · FastAPI · Pydantic · SQLAlchemy · Alembic · Postgres (prod) /
 - Last-write-wins under concurrent updates (no optimistic versioning).
 - Redis `SCAN` invalidation is good enough at interview/prod-early scale; key versioning is a later optimization.
 - No rate limiting / WAF yet — put at the gateway if needed.
-- No audit log, percentage rollouts, or webhooks.
+- No audit log, attribute targeting beyond percent, or webhooks.
+- Percentage rollout is integer 0–100 only (no sticky assignment when percent decreases).
 
 ## Testing strategy
 

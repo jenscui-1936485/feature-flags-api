@@ -69,6 +69,7 @@ When `API_KEY` is set, send `X-API-Key` on all non-public routes. Public: `/live
 4. Force include/exclude for QA via per-user overrides (they always win)
 
 `rollout_percent` defaults to **100** (everyone when enabled) for backward compatibility.
+
 ## Tests
 
 ```bash
@@ -89,6 +90,8 @@ flowchart LR
 ```
 
 ## DigitalOcean
+
+**Live app:** https://feature-flags-api-ie7au.ondigitalocean.app
 
 1. Provision managed Postgres + managed Redis/Valkey (or reuse clusters named in `.do/app.yaml`).
 2. Set secret `API_KEY` (long random). `DATABASE_URL` / `REDIS_URL` bind from attached DB components.
