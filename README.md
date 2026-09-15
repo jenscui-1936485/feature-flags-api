@@ -57,6 +57,8 @@ curl -s 'http://127.0.0.1:8080/evaluate/new-checkout?user_id=alice' \
 | `DELETE` | `/flags/{key}/users/{user_id}` | Remove override |
 | `GET` | `/evaluate/{key}?user_id=` | Evaluate (`source`, `bucket`, `cached`) |
 
+Copy-paste curls for every endpoint: [docs/API_EXAMPLES.md](docs/API_EXAMPLES.md).
+
 When `API_KEY` is set, send `X-API-Key` on all non-public routes. Public: `/live`, `/ready`, `/health`, `/docs`.
 
 **Precedence:** user override → else if `enabled=false` (kill switch) → else percentage rollout (`hash(flag_key:user_id) % 100 < rollout_percent`) → missing flag → `404`.
@@ -75,6 +77,8 @@ When `API_KEY` is set, send `X-API-Key` on all non-public routes. Public: `/live
 ```bash
 pytest -q
 ```
+
+Manual API demos (local + DigitalOcean): [docs/API_EXAMPLES.md](docs/API_EXAMPLES.md).
 
 ## Architecture
 
