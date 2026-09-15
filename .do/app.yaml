@@ -3,21 +3,38 @@ region: nyc
 services:
   - name: api
     github:
-      repo: REPLACE_WITH_YOUR_GITHUB_USER/feature-flags-api
+      repo: jenscui-1936485/feature-flags-api
       branch: main
       deploy_on_push: true
     dockerfile_path: Dockerfile
     http_port: 8080
-    instance_count: 1
-    instance_size_slug: basic-xxs
+    instance_count: 2
+    instance_size_slug: basic-xs
     health_check:
-      http_path: /health
+      http_path: /ready
     envs:
       - key: PORT
         value: "8080"
-      - key: DATABASE_URL
-        value: sqlite:////tmp/feature_flags.db
+      - key: ENVIRONMENT
+        value: production
       - key: CACHE_TTL_SECONDS
         value: "60"
       - key: LOG_LEVEL
         value: INFO
+      - key: RUN_MIGRATIONS_ON_STARTUP
+        value: "true"
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: REDIS_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: API_KEY
+        scope: RUN_TIME
+        type: SECRET
+databases:
+  - name: flags-db
+    engine: PG
+    production: true
+    version: "16"
+# Attach a DigitalOcean Managed Redis (or Valkey) and set REDIS_URL + DATABASE_URL in the UI/secrets.

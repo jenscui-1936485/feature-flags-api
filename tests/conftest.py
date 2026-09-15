@@ -1,45 +1,66 @@
+from collections.abc import Generator
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.cache import EvaluationCache
+from app.cache import MemoryEvaluationCache
 from app.config import Settings
 from app.db import Base, get_db
 from app.deps import get_cache
 from app.main import create_app
 
 
-@pytest.fixture()
-def client() -> TestClient:
+def _build_client(settings: Settings) -> TestClient:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    testing_session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(bind=engine)
-
-    settings = Settings(cache_ttl_seconds=60, cache_maxsize=1000)
-    cache = EvaluationCache(settings)
-
-    app = create_app()
+    cache = MemoryEvaluationCache(settings)
+    app = create_app(settings)
 
     def override_get_db():
-        db = TestingSessionLocal()
+        db = testing_session()
         try:
             yield db
         finally:
             db.close()
 
-    def override_get_cache() -> EvaluationCache:
-        return cache
-
     app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_cache] = override_get_cache
+    app.dependency_overrides[get_cache] = lambda: cache
+    return TestClient(app)
 
-    with TestClient(app) as test_client:
+
+@pytest.fixture()
+def settings() -> Settings:
+    return Settings(
+        environment="development",
+        api_key="",
+        redis_url="",
+        cache_ttl_seconds=60,
+        cache_maxsize=1000,
+        run_migrations_on_startup=False,
+    )
+
+
+@pytest.fixture()
+def client(settings: Settings) -> Generator[TestClient, None, None]:
+    with _build_client(settings) as test_client:
         yield test_client
 
-    app.dependency_overrides.clear()
+
+@pytest.fixture()
+def auth_client() -> Generator[TestClient, None, None]:
+    settings = Settings(
+        environment="development",
+        api_key="test-secret",
+        redis_url="",
+        run_migrations_on_startup=False,
+    )
+    with _build_client(settings) as test_client:
+        yield test_client

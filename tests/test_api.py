@@ -1,3 +1,19 @@
+def test_live(client):
+    response = client.get("/live")
+    assert response.status_code == 200
+    assert response.json()["status"] == "alive"
+
+
+def test_ready(client):
+    response = client.get("/ready")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["database"] == "up"
+    assert body["cache"] == "up"
+    assert body["cache_backend"] == "memory"
+
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
@@ -114,3 +130,24 @@ def test_empty_patch_rejected(client):
     client.post("/flags", json={"key": "patch-me", "enabled": False})
     response = client.patch("/flags/patch-me", json={})
     assert response.status_code == 422
+
+
+def test_request_id_header(client):
+    response = client.get("/live")
+    assert "x-request-id" in response.headers
+
+
+def test_auth_required_when_configured(auth_client):
+    denied = auth_client.post("/flags", json={"key": "secure", "enabled": True})
+    assert denied.status_code == 401
+
+    allowed = auth_client.post(
+        "/flags",
+        json={"key": "secure", "enabled": True},
+        headers={"X-API-Key": "test-secret"},
+    )
+    assert allowed.status_code == 201
+
+    assert auth_client.get("/health").status_code == 200
+    assert auth_client.get("/ready").status_code == 200
+    assert auth_client.get("/live").status_code == 200

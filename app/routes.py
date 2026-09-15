@@ -1,11 +1,10 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.cache import EvaluationCache
-from app.db import get_db
+from app.cache import EvaluationCache, RedisEvaluationCache
+from app.db import check_db, get_db
 from app.deps import get_cache
 from app.schemas import (
     EvaluateResponse,
@@ -14,8 +13,10 @@ from app.schemas import (
     FlagResponse,
     FlagUpdate,
     HealthResponse,
+    LiveResponse,
     OverrideResponse,
     OverrideUpsert,
+    ReadyResponse,
 )
 from app.service import (
     FlagConflictError,
@@ -35,17 +36,48 @@ def get_service(
     return FlagService(db=db, cache=cache)
 
 
-@router.get("/health", response_model=HealthResponse)
-def health(db: Session = Depends(get_db)) -> HealthResponse:
+@router.get("/live", response_model=LiveResponse)
+def live() -> LiveResponse:
+    return LiveResponse(status="alive")
+
+
+@router.get("/ready", response_model=ReadyResponse)
+def ready(cache: EvaluationCache = Depends(get_cache)) -> ReadyResponse:
+    db_ok = check_db()
     try:
-        db.execute(text("SELECT 1"))
-        return HealthResponse(status="ok", database="up")
+        cache_ok = cache.ping()
     except Exception:
-        logger.exception("Health check failed")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"status": "degraded", "database": "down"},
-        ) from None
+        logger.exception("Cache ping failed")
+        cache_ok = False
+
+    backend = "redis" if isinstance(cache, RedisEvaluationCache) else "memory"
+    if db_ok and cache_ok:
+        return ReadyResponse(
+            status="ready",
+            database="up",
+            cache="up",
+            cache_backend=backend,
+        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "status": "not_ready",
+            "database": "up" if db_ok else "down",
+            "cache": "up" if cache_ok else "down",
+            "cache_backend": backend,
+        },
+    )
+
+
+@router.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    """Backward-compatible combined check (DB). Prefer /live and /ready in production."""
+    if check_db():
+        return HealthResponse(status="ok", database="up")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"status": "degraded", "database": "down"},
+    )
 
 
 @router.post(

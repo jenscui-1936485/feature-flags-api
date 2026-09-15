@@ -6,3 +6,6 @@ pydantic-settings>=2.7.0,<3
 cachetools>=5.5.0,<8
 httpx>=0.28.0,<1
 pytest>=8.3.0,<10
+redis>=5.0.0,<7
+psycopg[binary]>=3.1.0,<4
+alembic>=1.14.0,<2

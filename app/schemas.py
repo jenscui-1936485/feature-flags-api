@@ -61,3 +61,14 @@ class EvaluateResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     database: Literal["up", "down"]
+
+
+class LiveResponse(BaseModel):
+    status: Literal["alive"]
+
+
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
+    database: Literal["up", "down"]
+    cache: Literal["up", "down"]
+    cache_backend: Literal["memory", "redis"]

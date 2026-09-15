@@ -13,25 +13,24 @@
 
 ### Deferred
 
-Percentage rollouts, cohorts, Redis, auth, multi-tenant, audit log, SDKs, webhooks, workers/queues.
+Percentage rollouts, cohorts, multi-tenant RBAC/OIDC, audit log, SDKs, webhooks, workers/queues.
 
 ### Assumptions
 
-- No auth for the interview demo.
 - Missing flag on evaluate → `404`.
-- DigitalOcean App Platform, single instance.
-- In-process TTL cache (not Redis).
-- SQLite by default; `DATABASE_URL` can point at Postgres later.
+- Dev defaults: SQLite + in-process TTL cache; API key optional.
+- Production: Postgres + Redis + required `API_KEY`; multi-instance safe.
+- DigitalOcean App Platform (or docker compose) for deploy.
 
 ## Non-functional
 
 | Quality | Prototype target |
 |---------|------------------|
 | Correctness | Deterministic precedence; write-through cache invalidation; tests |
-| Durability | SQLite/Postgres via SQLAlchemy |
+| Durability | SQLite/Postgres via SQLAlchemy + Alembic |
 | Latency | Warm-cache evaluate without DB round-trip |
 | Consistency | Unique constraints; last-write-wins on concurrent updates |
-| Deployability | Docker + App Platform + `/health` + GitHub Actions |
+| Deployability | Docker + App Platform + `/live` `/ready` + GitHub Actions |
 
 ## Core entities
 
@@ -58,7 +57,9 @@ Percentage rollouts, cohorts, Redis, auth, multi-tenant, audit log, SDKs, webhoo
 | `PUT` | `/flags/{key}/users/{user_id}` | Upsert override |
 | `DELETE` | `/flags/{key}/users/{user_id}` | Remove override; `404` if missing |
 | `GET` | `/evaluate/{key}?user_id=` | Evaluate; returns `source`, `cached` |
-| `GET` | `/health` | DB connectivity check |
+| `GET` | `/live` | Liveness (no deps) |
+| `GET` | `/ready` | DB + cache readiness |
+| `GET` | `/health` | DB check (compat) |
 
 ## Data flow
 
@@ -70,64 +71,65 @@ Percentage rollouts, cohorts, Redis, auth, multi-tenant, audit log, SDKs, webhoo
 
 ## Architecture
 
+### Development (default)
+
 ```mermaid
 flowchart LR
-  Client -->|HTTPS| DO[DigitalOcean App Platform]
-  DO --> API[FastAPI / Uvicorn]
+  Client --> API[FastAPI / Uvicorn]
   API --> Val[Pydantic validation]
   Val --> Svc[Flag service]
   Svc --> Cache[In-process TTL cache]
-  Svc --> DB[(SQLite / Postgres)]
-  API --> Log[Stdout logs]
-  API --> Health["/health"]
+  Svc --> DB[(SQLite)]
+  API --> Ready["/live /ready /health"]
 ```
 
-### Production evolution (not implemented)
+### Production (`ENVIRONMENT=production` + docker compose / App Platform)
 
 ```mermaid
 flowchart LR
-  Client --> LB[LB / API GW]
-  LB --> API[API replicas]
-  API --> R[(Redis)]
-  API --> PG[(Managed Postgres)]
+  Client -->|HTTPS + X-API-Key| LB[LB / App Platform]
+  LB --> API[FastAPI replicas]
+  API --> Val[Pydantic validation]
+  Val --> Svc[Flag service]
+  Svc --> Redis[(Redis shared TTL cache)]
+  Svc --> PG[(Postgres)]
+  API --> Ready["/live /ready"]
+  API --> Log[Stdout logs + X-Request-ID]
 ```
+
+Production boot **fails fast** unless Postgres, Redis, and `API_KEY` are configured.
 
 ## Technology stack
 
-Python 3.12 · FastAPI · Pydantic · SQLAlchemy · SQLite · cachetools · pytest · Uvicorn · Docker · DigitalOcean App Platform · GitHub Actions
+Python 3.12 · FastAPI · Pydantic · SQLAlchemy · Alembic · Postgres (prod) / SQLite (dev) · Redis (prod) / cachetools memory (dev) · pytest · Uvicorn · Docker Compose · DigitalOcean App Platform · GitHub Actions
 
 ## Tradeoffs
 
 | Decision | Choice | Why |
 |----------|--------|-----|
-| Cache | In-process TTL | Meets caching requirement without Redis |
-| DB | SQLite | Fastest DO single-instance path |
-| Shape | Modular monolith | Three-hour scope |
-| Auth | None | Demo velocity; document as gap |
+| Cache | Redis in prod, memory in dev | Shared coherency across replicas |
+| DB | Postgres in prod, SQLite in dev | Concurrent writes + HA |
+| Shape | Modular monolith | Enough until async side effects appear |
+| Auth | API key when configured | Simple shared-secret for service-to-service |
+| Migrations | Alembic | Repeatable schema changes |
 
 ## Known limitations
 
-- Cache is not shared across processes/replicas — run **one** instance with SQLite.
-- No authentication.
-- Last-write-wins under concurrent updates.
-- `create_all` used for schema bootstrap (Alembic deferred).
+- API key is shared-secret (not OIDC / per-tenant RBAC).
+- Last-write-wins under concurrent updates (no optimistic versioning).
+- Redis `SCAN` invalidation is good enough at interview/prod-early scale; key versioning is a later optimization.
+- No rate limiting / WAF yet — put at the gateway if needed.
+- No audit log, percentage rollouts, or webhooks.
 
 ## Testing strategy
 
 - Create / duplicate / validation / 404 paths
 - Global vs override evaluation precedence
 - Cache invalidation after write
-- `/health`
-- Integration tests via FastAPI `TestClient` + temp SQLite
+- `/live`, `/ready`, `/health`
+- API-key auth when configured
+- Integration tests via FastAPI `TestClient` + temp SQLite + memory cache
 
 ## Scaling plan
 
-Keep monolith until multi-instance HA is required, then: managed Postgres + Redis shared cache + optional edge rate limits. No queue unless async side effects appear.
-
-## Implementation milestones
-
-1. Scaffold + DESIGN
-2. Models, service, cache, routes (MVP E2E)
-3. Tests + CI
-4. Docker + App Platform config + README
-5. Deploy smoke + review notes
+Already supports multi-instance via Postgres + Redis. Next increments: gateway rate limits, managed Redis failover, read replicas, OIDC, optional queue for webhooks/audit.
