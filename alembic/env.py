@@ -15,11 +15,15 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# DO/Heroku URLs need the psycopg3 dialect; escape % for ConfigParser.
+config.set_main_option(
+    "sqlalchemy.url",
+    settings.sqlalchemy_database_url.replace("%", "%%"),
+)
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    url = settings.sqlalchemy_database_url
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -41,7 +45,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=settings.database_url.startswith("sqlite"),
+            render_as_batch=settings.sqlalchemy_database_url.startswith("sqlite"),
         )
         with context.begin_transaction():
             context.run_migrations()

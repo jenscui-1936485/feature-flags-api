@@ -28,7 +28,7 @@ services:
       - key: LOG_LEVEL
         value: INFO
       - key: RUN_MIGRATIONS_ON_STARTUP
-        value: "true"
+        value: "false"
       - key: DATABASE_URL
         scope: RUN_TIME
         value: ${flags-db.DATABASE_URL}
