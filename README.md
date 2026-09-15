@@ -2,7 +2,7 @@
 
 Production-minded REST API for storing feature flags, managing global and per-user state, and evaluating availability with an in-process TTL cache.
 
-See [DESIGN.md](DESIGN.md) for requirements, architecture, tradeoffs, and scaling notes.
+See [DESIGN.md](DESIGN.md) (also [docs/DESIGN.md](docs/DESIGN.md)) for requirements, architecture, tradeoffs, and scaling notes.
 
 ## Quick start
 
