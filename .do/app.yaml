@@ -1,0 +1,23 @@
+name: feature-flags-api
+region: nyc
+services:
+  - name: api
+    github:
+      repo: REPLACE_WITH_YOUR_GITHUB_USER/feature-flags-api
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /health
+    envs:
+      - key: PORT
+        value: "8080"
+      - key: DATABASE_URL
+        value: sqlite:////tmp/feature_flags.db
+      - key: CACHE_TTL_SECONDS
+        value: "60"
+      - key: LOG_LEVEL
+        value: INFO
