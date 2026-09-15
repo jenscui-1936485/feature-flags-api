@@ -8,8 +8,15 @@ services:
       deploy_on_push: true
     dockerfile_path: Dockerfile
     http_port: 8080
-    instance_count: 2
+    # Request-based autoscaling works on shared CPU plans (basic-*).
+    # Do not set instance_count when autoscaling is enabled.
     instance_size_slug: basic-xs
+    autoscaling:
+      min_instance_count: 2
+      max_instance_count: 5
+      metrics:
+        requests_per_second:
+          per_instance: 50
     health_check:
       http_path: /ready
     envs:
@@ -23,18 +30,25 @@ services:
         value: INFO
       - key: RUN_MIGRATIONS_ON_STARTUP
         value: "true"
+      # Bind to attached managed DB components (trusted sources wired by App Platform).
       - key: DATABASE_URL
         scope: RUN_TIME
-        type: SECRET
+        value: ${flags-db.DATABASE_URL}
       - key: REDIS_URL
         scope: RUN_TIME
-        type: SECRET
+        value: ${flags-cache.DATABASE_URL}
       - key: API_KEY
         scope: RUN_TIME
         type: SECRET
+        value: REPLACE_ME_AT_DEPLOY
 databases:
+  # Use the already-provisioned clusters (flags-pg / flags-redis Valkey).
   - name: flags-db
     engine: PG
-    production: true
     version: "16"
-# Attach a DigitalOcean Managed Redis (or Valkey) and set REDIS_URL + DATABASE_URL in the UI/secrets.
+    production: true
+    cluster_name: flags-pg
+  - name: flags-cache
+    engine: REDIS
+    production: true
+    cluster_name: flags-redis

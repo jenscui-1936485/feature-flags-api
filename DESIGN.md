@@ -13,7 +13,7 @@
 
 ### Deferred
 
-Percentage rollouts, cohorts, multi-tenant RBAC/OIDC, audit log, SDKs, webhooks, workers/queues.
+Percentage cohorts beyond integer percent, multi-tenant RBAC/OIDC, audit log, SDKs, webhooks, workers/queues, sticky assignment when percent decreases.
 
 ### Assumptions
 
@@ -21,7 +21,7 @@ Percentage rollouts, cohorts, multi-tenant RBAC/OIDC, audit log, SDKs, webhooks,
 - Dev defaults: SQLite + in-process TTL cache; API key optional.
 - Production: Postgres + Redis + required `API_KEY`; multi-instance safe.
 - DigitalOcean App Platform (or docker compose) for deploy.
-
+- `rollout_percent` default **100** so `enabled=true` still means everyone unless ramped down.
 ## Non-functional
 
 | Quality | Prototype target |
@@ -36,27 +36,27 @@ Percentage rollouts, cohorts, multi-tenant RBAC/OIDC, audit log, SDKs, webhooks,
 
 ### FeatureFlag
 
-- Fields: `id`, `key`, `description`, `enabled`, `created_at`, `updated_at`
-- Constraints: `UNIQUE(key)`, `key` pattern `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`
+- Fields: `id`, `key`, `description`, `enabled`, `rollout_percent` (0–100, default 100), `created_at`, `updated_at`
+- Constraints: `UNIQUE(key)`, `key` pattern `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`, check on `rollout_percent`
 - Relations: 1 → N `UserOverride`
 
 ### UserOverride
 
 - Fields: `id`, `flag_id`, `user_id`, `enabled`, `created_at`, `updated_at`
 - Constraints: `UNIQUE(flag_id, user_id)`, FK cascade delete
-- Precedence: override wins over global `enabled`
+- Precedence: override wins over global `enabled` + `rollout_percent`
 
 ## API contract
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `POST` | `/flags` | Create; `409` on duplicate key |
+| `POST` | `/flags` | Create; optional `rollout_percent` (default 100); `409` on duplicate |
 | `GET` | `/flags` | List |
 | `GET` | `/flags/{key}` | Get; `404` if missing |
-| `PATCH` | `/flags/{key}` | Update `enabled` and/or `description` |
+| `PATCH` | `/flags/{key}` | Update `enabled`, `description`, and/or `rollout_percent` |
 | `PUT` | `/flags/{key}/users/{user_id}` | Upsert override |
 | `DELETE` | `/flags/{key}/users/{user_id}` | Remove override; `404` if missing |
-| `GET` | `/evaluate/{key}?user_id=` | Evaluate; returns `source`, `cached` |
+| `GET` | `/evaluate/{key}?user_id=` | Evaluate; returns `source`, `bucket`, `cached` |
 | `GET` | `/live` | Liveness (no deps) |
 | `GET` | `/ready` | DB + cache readiness |
 | `GET` | `/health` | DB check (compat) |
@@ -64,11 +64,12 @@ Percentage rollouts, cohorts, multi-tenant RBAC/OIDC, audit log, SDKs, webhooks,
 ## Data flow
 
 1. **Create/update:** validate → DB transaction → commit → invalidate cache → respond.
-2. **Evaluate (miss):** validate → load flag → load override → compute → cache → respond (`cached: false`).
+2. **Evaluate (miss):** validate → load flag → load override → compute (override / kill switch / SHA-256 bucket vs `rollout_percent`) → cache → respond (`cached: false`).
 3. **Evaluate (hit):** cache → respond (`cached: true`).
 4. **Duplicate create:** unique violation → `409`.
 5. **Startup:** load env → init DB → init cache → bind `0.0.0.0:$PORT`.
 
+**Evaluate precedence:** override → `enabled=false` (source `default`) → else `rollout` via `SHA-256(flag_key:user_id) % 100 < rollout_percent`.
 ## Architecture
 
 ### Development (default)
@@ -124,11 +125,12 @@ Python 3.12 · FastAPI · Pydantic · SQLAlchemy · Alembic · Postgres (prod) /
 ## Testing strategy
 
 - Create / duplicate / validation / 404 paths
-- Global vs override evaluation precedence
-- Cache invalidation after write
+- Global vs override vs percentage-rollout evaluation
+- Cache invalidation after write (including `rollout_percent`)
 - `/live`, `/ready`, `/health`
 - API-key auth when configured
 - Integration tests via FastAPI `TestClient` + temp SQLite + memory cache
+- Unit tests for `rollout_bucket` stability
 
 ## Scaling plan
 

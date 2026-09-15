@@ -52,15 +52,23 @@ curl -s 'http://127.0.0.1:8080/evaluate/new-checkout?user_id=alice' \
 | `POST` | `/flags` | Create (`409` duplicate) |
 | `GET` | `/flags` | List |
 | `GET` | `/flags/{key}` | Get |
-| `PATCH` | `/flags/{key}` | Update global state |
+| `PATCH` | `/flags/{key}` | Update `enabled`, `description`, and/or `rollout_percent` |
 | `PUT` | `/flags/{key}/users/{user_id}` | Upsert override |
 | `DELETE` | `/flags/{key}/users/{user_id}` | Remove override |
-| `GET` | `/evaluate/{key}?user_id=` | Evaluate (`source`, `cached`) |
+| `GET` | `/evaluate/{key}?user_id=` | Evaluate (`source`, `bucket`, `cached`) |
 
 When `API_KEY` is set, send `X-API-Key` on all non-public routes. Public: `/live`, `/ready`, `/health`, `/docs`.
 
-**Precedence:** user override → else global default → missing flag → `404`.
+**Precedence:** user override → else if `enabled=false` (kill switch) → else percentage rollout (`hash(flag_key:user_id) % 100 < rollout_percent`) → missing flag → `404`.
 
+### Gradual rollout workflow
+
+1. Create with a small cohort: `{"key":"new-checkout","enabled":true,"rollout_percent":5}`
+2. Ramp with `PATCH`: `{"rollout_percent":25}` → `50` → `100`
+3. Incident kill switch: `PATCH {"enabled":false}` or `{"rollout_percent":0}`
+4. Force include/exclude for QA via per-user overrides (they always win)
+
+`rollout_percent` defaults to **100** (everyone when enabled) for backward compatibility.
 ## Tests
 
 ```bash
@@ -82,10 +90,10 @@ flowchart LR
 
 ## DigitalOcean
 
-1. Provision managed Postgres + managed Redis/Valkey.
-2. Set secrets: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `ENVIRONMENT=production`.
-3. Deploy via `.do/app.yaml` (update GitHub repo) or App Platform UI; health path `/ready`.
-4. Scale to 2+ instances — safe with Postgres + Redis.
+1. Provision managed Postgres + managed Redis/Valkey (or reuse clusters named in `.do/app.yaml`).
+2. Set secret `API_KEY` (long random). `DATABASE_URL` / `REDIS_URL` bind from attached DB components.
+3. Deploy via `.do/app.yaml` or App Platform UI; health path `/ready`.
+4. Autoscaling: 2–5 instances by requests/sec (`basic-xs` shared CPU). Switch to a dedicated CPU size if you want CPU-based autoscaling instead.
 
 ```bash
 doctl apps create --spec .do/app.yaml

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.cache import EvaluationCache
 from app.models import FeatureFlag, UserOverride, utcnow
+from app.rollout import rollout_bucket
 from app.schemas import FlagCreate, FlagUpdate
 
 
@@ -29,6 +30,7 @@ class FlagService:
             key=payload.key,
             description=payload.description,
             enabled=payload.enabled,
+            rollout_percent=payload.rollout_percent,
         )
         self.db.add(flag)
         try:
@@ -55,6 +57,8 @@ class FlagService:
             flag.description = payload.description
         if payload.enabled is not None:
             flag.enabled = payload.enabled
+        if payload.rollout_percent is not None:
+            flag.rollout_percent = payload.rollout_percent
         flag.updated_at = utcnow()
         self.db.commit()
         self.db.refresh(flag)
@@ -119,6 +123,7 @@ class FlagService:
                 "user_id": user_id,
                 "enabled": cached["enabled"],
                 "source": cached["source"],
+                "bucket": cached.get("bucket"),
                 "cached": True,
             }
 
@@ -129,18 +134,32 @@ class FlagService:
                 UserOverride.user_id == user_id,
             )
         )
+
+        bucket: int | None = None
         if override is not None:
             enabled = override.enabled
             source = "override"
-        else:
-            enabled = flag.enabled
+        elif not flag.enabled:
+            # Kill switch: everyone off (overrides already handled above).
+            enabled = False
             source = "default"
+        else:
+            percent = flag.rollout_percent
+            bucket = rollout_bucket(flag.key, user_id)
+            source = "rollout"
+            if percent >= 100:
+                enabled = True
+            elif percent <= 0:
+                enabled = False
+            else:
+                enabled = bucket < percent
 
-        self.cache.set_evaluation(key, user_id, enabled, source)
+        self.cache.set_evaluation(key, user_id, enabled, source, bucket)
         return {
             "key": key,
             "user_id": user_id,
             "enabled": enabled,
             "source": source,
+            "bucket": bucket,
             "cached": False,
         }

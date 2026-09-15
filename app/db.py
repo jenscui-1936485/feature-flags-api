@@ -20,7 +20,8 @@ def _connect_args(url: str) -> dict:
 
 
 def create_db_engine(database_url: str | None = None) -> Engine:
-    url = database_url or get_settings().database_url
+    settings = get_settings()
+    url = database_url or settings.sqlalchemy_database_url
     eng = create_engine(
         url,
         connect_args=_connect_args(url),
@@ -38,7 +39,7 @@ def create_db_engine(database_url: str | None = None) -> Engine:
 
 
 settings = get_settings()
-engine = create_db_engine(settings.database_url)
+engine = create_db_engine(settings.sqlalchemy_database_url)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

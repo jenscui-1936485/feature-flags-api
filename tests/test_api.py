@@ -58,7 +58,8 @@ def test_evaluate_uses_global_default(client):
     assert response.status_code == 200
     body = response.json()
     assert body["enabled"] is True
-    assert body["source"] == "default"
+    assert body["source"] == "rollout"
+    assert body["bucket"] is not None
     assert body["cached"] is False
 
 
@@ -73,6 +74,7 @@ def test_evaluate_override_precedence_and_cache(client):
         "user_id": "alice",
         "enabled": True,
         "source": "override",
+        "bucket": None,
         "cached": False,
     }
 
@@ -86,6 +88,7 @@ def test_cache_invalidated_after_global_update(client):
     miss = client.get("/evaluate/search", params={"user_id": "u1"})
     assert miss.json()["enabled"] is False
     assert miss.json()["cached"] is False
+    assert miss.json()["source"] == "default"
 
     hit = client.get("/evaluate/search", params={"user_id": "u1"})
     assert hit.json()["cached"] is True
@@ -95,7 +98,7 @@ def test_cache_invalidated_after_global_update(client):
 
     after = client.get("/evaluate/search", params={"user_id": "u1"})
     assert after.json()["enabled"] is True
-    assert after.json()["source"] == "default"
+    assert after.json()["source"] == "rollout"
     assert after.json()["cached"] is False
 
 
@@ -109,7 +112,7 @@ def test_delete_override_falls_back_to_default(client):
 
     eval_response = client.get("/evaluate/ads", params={"user_id": "bob"})
     assert eval_response.json()["enabled"] is True
-    assert eval_response.json()["source"] == "default"
+    assert eval_response.json()["source"] == "rollout"
 
 
 def test_evaluate_requires_user_id(client):
@@ -151,3 +154,113 @@ def test_auth_required_when_configured(auth_client):
     assert auth_client.get("/health").status_code == 200
     assert auth_client.get("/ready").status_code == 200
     assert auth_client.get("/live").status_code == 200
+
+
+def test_create_defaults_rollout_percent_100(client):
+    created = client.post("/flags", json={"key": "full-rollout", "enabled": True})
+    assert created.status_code == 201
+    assert created.json()["rollout_percent"] == 100
+
+
+def test_kill_switch_disables_even_at_100_percent(client):
+    client.post(
+        "/flags",
+        json={"key": "kill", "enabled": False, "rollout_percent": 100},
+    )
+    body = client.get("/evaluate/kill", params={"user_id": "anyone"}).json()
+    assert body["enabled"] is False
+    assert body["source"] == "default"
+    assert body["bucket"] is None
+
+
+def test_rollout_percent_zero_disables_all(client):
+    client.post(
+        "/flags",
+        json={"key": "zero", "enabled": True, "rollout_percent": 0},
+    )
+    body = client.get("/evaluate/zero", params={"user_id": "anyone"}).json()
+    assert body["enabled"] is False
+    assert body["source"] == "rollout"
+    assert body["bucket"] is not None
+
+
+def test_rollout_percent_100_enables_all(client):
+    client.post(
+        "/flags",
+        json={"key": "all", "enabled": True, "rollout_percent": 100},
+    )
+    for user in ("a", "b", "c"):
+        body = client.get("/evaluate/all", params={"user_id": user}).json()
+        assert body["enabled"] is True
+        assert body["source"] == "rollout"
+
+
+def test_rollout_bucket_stable_for_same_user(client):
+    client.post(
+        "/flags",
+        json={"key": "stable", "enabled": True, "rollout_percent": 50},
+    )
+    first = client.get("/evaluate/stable", params={"user_id": "alice"}).json()
+    second = client.get("/evaluate/stable", params={"user_id": "alice"}).json()
+    assert first["bucket"] == second["bucket"]
+    assert first["enabled"] == second["enabled"]
+    assert second["cached"] is True
+
+
+def test_different_flags_different_buckets_for_same_user(client):
+    client.post("/flags", json={"key": "flag-a", "enabled": True, "rollout_percent": 50})
+    client.post("/flags", json={"key": "flag-b", "enabled": True, "rollout_percent": 50})
+    a = client.get("/evaluate/flag-a", params={"user_id": "same-user"}).json()
+    b = client.get("/evaluate/flag-b", params={"user_id": "same-user"}).json()
+    from app.rollout import rollout_bucket
+
+    assert a["bucket"] == rollout_bucket("flag-a", "same-user")
+    assert b["bucket"] == rollout_bucket("flag-b", "same-user")
+    assert a["bucket"] != b["bucket"]
+
+
+def test_override_on_beats_zero_percent(client):
+    client.post("/flags", json={"key": "force-on", "enabled": True, "rollout_percent": 0})
+    client.put("/flags/force-on/users/qa", json={"enabled": True})
+    body = client.get("/evaluate/force-on", params={"user_id": "qa"}).json()
+    assert body["enabled"] is True
+    assert body["source"] == "override"
+
+
+def test_override_off_beats_full_percent(client):
+    client.post("/flags", json={"key": "force-off", "enabled": True, "rollout_percent": 100})
+    client.put("/flags/force-off/users/qa", json={"enabled": False})
+    body = client.get("/evaluate/force-off", params={"user_id": "qa"}).json()
+    assert body["enabled"] is False
+    assert body["source"] == "override"
+
+
+def test_patch_rollout_percent_invalidates_cache(client):
+    client.post(
+        "/flags",
+        json={"key": "ramp", "enabled": True, "rollout_percent": 0},
+    )
+    before = client.get("/evaluate/ramp", params={"user_id": "u1"}).json()
+    assert before["enabled"] is False
+    assert client.get("/evaluate/ramp", params={"user_id": "u1"}).json()["cached"] is True
+
+    patched = client.patch("/flags/ramp", json={"rollout_percent": 100})
+    assert patched.status_code == 200
+    assert patched.json()["rollout_percent"] == 100
+
+    after = client.get("/evaluate/ramp", params={"user_id": "u1"}).json()
+    assert after["enabled"] is True
+    assert after["cached"] is False
+    assert after["source"] == "rollout"
+
+
+def test_rollout_percent_out_of_range_rejected(client):
+    bad_create = client.post(
+        "/flags",
+        json={"key": "bad-pct", "enabled": True, "rollout_percent": 101},
+    )
+    assert bad_create.status_code == 422
+
+    client.post("/flags", json={"key": "ok-pct", "enabled": True, "rollout_percent": 10})
+    bad_patch = client.patch("/flags/ok-pct", json={"rollout_percent": -1})
+    assert bad_patch.status_code == 422

@@ -12,7 +12,12 @@ class EvaluationCache(Protocol):
     def get_evaluation(self, flag_key: str, user_id: str) -> dict[str, Any] | None: ...
 
     def set_evaluation(
-        self, flag_key: str, user_id: str, enabled: bool, source: str
+        self,
+        flag_key: str,
+        user_id: str,
+        enabled: bool,
+        source: str,
+        bucket: int | None = None,
     ) -> None: ...
 
     def invalidate_flag(self, flag_key: str) -> None: ...
@@ -42,12 +47,18 @@ class MemoryEvaluationCache:
             return dict(value) if value is not None else None
 
     def set_evaluation(
-        self, flag_key: str, user_id: str, enabled: bool, source: str
+        self,
+        flag_key: str,
+        user_id: str,
+        enabled: bool,
+        source: str,
+        bucket: int | None = None,
     ) -> None:
         with self._lock:
             self._cache[self._eval_key(flag_key, user_id)] = {
                 "enabled": enabled,
                 "source": source,
+                "bucket": bucket,
             }
 
     def invalidate_flag(self, flag_key: str) -> None:
@@ -87,20 +98,29 @@ class RedisEvaluationCache:
         raw = self._client.hgetall(self._eval_key(flag_key, user_id))
         if not raw:
             return None
+        bucket_raw = raw.get("bucket")
         return {
             "enabled": raw["enabled"] == "1",
             "source": raw["source"],
+            "bucket": int(bucket_raw) if bucket_raw not in (None, "") else None,
         }
 
     def set_evaluation(
-        self, flag_key: str, user_id: str, enabled: bool, source: str
+        self,
+        flag_key: str,
+        user_id: str,
+        enabled: bool,
+        source: str,
+        bucket: int | None = None,
     ) -> None:
         key = self._eval_key(flag_key, user_id)
+        mapping = {
+            "enabled": "1" if enabled else "0",
+            "source": source,
+            "bucket": "" if bucket is None else str(bucket),
+        }
         pipe = self._client.pipeline()
-        pipe.hset(
-            key,
-            mapping={"enabled": "1" if enabled else "0", "source": source},
-        )
+        pipe.hset(key, mapping=mapping)
         pipe.expire(key, self._ttl)
         pipe.execute()
 

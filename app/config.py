@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
 
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        """Normalize DO/Heroku-style URLs for SQLAlchemy + psycopg."""
+        url = self.database_url
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgres://")
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+        return url
+
 
 @lru_cache
 def get_settings() -> Settings:
